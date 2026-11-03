@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Nyheter: a news page built from RSS feeds, with images, titles and ingresses.
 
-Standard library only. Feeds are listed in feeds.txt (one URL per line) and
-refreshed in the background every REFRESH_INTERVAL seconds.
+Standard library only. Feeds are listed in feeds.txt (one URL per line).
+Run without arguments to serve the page locally, refreshing the feeds every
+REFRESH_INTERVAL seconds, or with --build DIR to write a static copy of the
+site (used by the GitHub Pages workflow).
 """
 
 import argparse
@@ -10,6 +12,7 @@ import html
 import json
 import os
 import re
+import shutil
 import threading
 import time
 import urllib.request
@@ -19,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor
 from email.utils import parsedate_to_datetime
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FEEDS_FILE = os.path.join(ROOT, "feeds.txt")
@@ -27,7 +30,6 @@ STATIC_DIR = os.path.join(ROOT, "static")
 STATIC_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".css": "text/css", ".js": "text/javascript"}
 PAGE = os.path.join(STATIC_DIR, "index.html")
 REFRESH_INTERVAL = 300
-ARTICLES_PER_PAGE = 30
 DEFAULT_PORT = 8765
 USER_AGENT = "Mozilla/5.0 (Nyheter RSS reader)"
 
@@ -40,6 +42,7 @@ IMG_TAG = re.compile(r"""<img[^>]+src=["']([^"']+)""", re.I)
 LINK_ONLY = re.compile(r"\s*<a\s[^>]*>[^<]*</a>\s*", re.I)
 
 articles = []
+updated = 0
 articles_lock = threading.Lock()
 
 
@@ -126,7 +129,7 @@ def fetch_feed(url, fallback_image=None):
 
 
 def refresh():
-    global articles
+    global articles, updated
     feeds = read_feeds()
     results = []
     with ThreadPoolExecutor(max_workers=8) as pool:
@@ -145,6 +148,7 @@ def refresh():
     if fresh:
         with articles_lock:
             articles = fresh
+            updated = int(time.time())
 
 
 def refresh_loop():
@@ -153,37 +157,36 @@ def refresh_loop():
         refresh()
 
 
-def get_articles(offset=0, limit=ARTICLES_PER_PAGE, source=None):
+def articles_json():
     with articles_lock:
-        selected = [a for a in articles if not source or a["source"] == source]
-    return selected[offset:offset + limit]
+        return json.dumps({"articles": articles, "updated": updated}, ensure_ascii=False).encode()
 
 
-def get_sources():
-    with articles_lock:
-        return sorted({a["source"] for a in articles})
+def build(out_dir):
+    """Write a static copy of the site, as served by GitHub Pages."""
+    refresh()
+    if not articles:
+        raise SystemExit("No articles fetched; not building an empty site")
+    shutil.rmtree(out_dir, ignore_errors=True)
+    shutil.copytree(STATIC_DIR, os.path.join(out_dir, "static"), ignore=shutil.ignore_patterns("index.html"))
+    shutil.copy(PAGE, os.path.join(out_dir, "index.html"))
+    with open(os.path.join(out_dir, "articles.json"), "wb") as f:
+        f.write(articles_json())
+    print(f"Built {out_dir} with {len(articles)} articles")
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
-        url = urlparse(self.path)
-        query = parse_qs(url.query)
-        try:
-            if url.path == "/":
-                with open(PAGE, "rb") as f:
-                    self.send(200, "text/html; charset=utf-8", f.read())
-            elif url.path == "/api/articles":
-                offset = max(0, int(query.get("offset", ["0"])[0]))
-                source = query.get("source", [None])[0]
-                self.send_json({"articles": get_articles(offset, source=source)})
-            elif url.path == "/api/sources":
-                self.send_json({"sources": get_sources()})
-            elif url.path.startswith("/static/") and self.send_static(url.path[len("/static/"):]):
-                pass
-            else:
-                self.send(404, "text/plain", b"Not found")
-        except ValueError:
-            self.send(400, "text/plain", b"Bad request")
+        path = urlparse(self.path).path
+        if path in ("/", "/index.html"):
+            with open(PAGE, "rb") as f:
+                self.send(200, "text/html; charset=utf-8", f.read())
+        elif path == "/articles.json":
+            self.send(200, "application/json; charset=utf-8", articles_json())
+        elif path.startswith("/static/") and self.send_static(path[len("/static/"):]):
+            pass
+        else:
+            self.send(404, "text/plain", b"Not found")
 
     def send_static(self, name):
         # Flat directory only, so no path can escape it
@@ -194,10 +197,6 @@ class Handler(BaseHTTPRequestHandler):
         with open(path, "rb") as f:
             self.send(200, content_type, f.read())
         return True
-
-    def send_json(self, data, status=200):
-        body = json.dumps(data, ensure_ascii=False).encode()
-        self.send(status, "application/json; charset=utf-8", body)
 
     def send(self, status, content_type, body):
         self.send_response(status)
@@ -215,7 +214,12 @@ def main():
     parser = argparse.ArgumentParser(description="Serve a news page built from RSS feeds.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="don't open the page on start")
+    parser.add_argument("--build", metavar="DIR", help="write a static site to DIR and exit")
     args = parser.parse_args()
+
+    if args.build:
+        build(args.build)
+        return
 
     print("Fetching feeds …")
     refresh()

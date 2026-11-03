@@ -238,6 +238,10 @@
 </footer>
 
 <script>
+  // articles.json is written by server.py: served live locally, or built
+  // on a schedule by the GitHub Pages workflow
+  const DATA_URL = "articles.json";
+  const PAGE_SIZE = 30;
   const NEW_CHECK_INTERVAL = 60_000;
 
   const grid = document.getElementById("grid");
@@ -247,18 +251,17 @@
   const sentinel = document.getElementById("sentinel");
 
   let source = decodeURIComponent(location.hash.slice(1)) || null;
-  let offset = 0;
-  let newest = 0;
-  let done = false;
-  let loading = false;
-  let generation = 0;
-  const seen = new Set();
+  let data = { articles: [], updated: 0 };
+  let pending = null;
+  let list = [];
+  let shown = 0;
 
   const shortName = (name) => name.replace(/^Siste nytt (fra|-)\s*/i, "");
+  const clock = (d) => d.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
 
   function formatTime(unix) {
     const d = new Date(unix * 1000);
-    const time = d.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+    const time = clock(d);
     const today = new Date();
     const yesterday = new Date(today);
     yesterday.setDate(today.getDate() - 1);
@@ -305,87 +308,65 @@
     return link;
   }
 
-  async function fetchArticles(from) {
-    const params = new URLSearchParams({ offset: from });
-    if (source) params.set("source", source);
-    const res = await fetch(`/api/articles?${params}`);
+  async function fetchData() {
+    const res = await fetch(DATA_URL, { cache: "no-store" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()).articles;
+    return res.json();
   }
 
-  function setStatus(text, html = false) {
-    statusEl[html ? "innerHTML" : "textContent"] = text;
-  }
+  const newestOf = (articles) => Math.max(0, ...articles.map((a) => a.published));
 
   function nearBottom() {
     return sentinel.getBoundingClientRect().top < innerHeight + 800;
   }
 
-  async function loadMore() {
-    if (loading || done) return;
-    const gen = generation;
-    loading = true;
-    moreBtn.hidden = true;
-    setStatus("Laster …");
-    try {
-      const articles = await fetchArticles(offset);
-      if (gen !== generation) return;
-      offset += articles.length;
-      done = articles.length === 0;
-      for (const article of articles) {
-        if (!article.url || seen.has(article.url)) continue;
-        seen.add(article.url);
-        newest = Math.max(newest, article.published);
-        grid.append(card(article, grid.children.length === 0));
-      }
-      if (done && grid.children.length === 0) {
-        setStatus("Ingen saker funnet. Sjekk at feeds.txt har gyldige RSS-adresser.", true);
-      } else {
-        setStatus(done ? "Ingen flere saker" : "");
-        moreBtn.hidden = done;
-      }
-    } catch (err) {
-      if (gen !== generation) return;
-      setStatus("Kunne ikke hente saker.");
-      moreBtn.hidden = false;
-    } finally {
-      if (gen === generation) loading = false;
+  function loadMore() {
+    for (const article of list.slice(shown, shown + PAGE_SIZE)) {
+      grid.append(card(article, grid.children.length === 0));
     }
-    if (gen === generation && !done && nearBottom()) loadMore();
+    shown = Math.min(list.length, shown + PAGE_SIZE);
+    const done = shown >= list.length;
+    if (list.length === 0) {
+      statusEl.textContent = "Ingen saker funnet.";
+    } else {
+      statusEl.textContent = done ? "Ingen flere saker" : "";
+    }
+    moreBtn.hidden = done;
+    if (!done && nearBottom()) loadMore();
   }
 
   function reset() {
-    generation++;
-    loading = false;
-    done = false;
-    offset = 0;
-    newest = 0;
-    seen.clear();
+    list = data.articles.filter((a) => !source || a.source === source);
+    shown = 0;
     grid.replaceChildren();
-    newBtn.hidden = true;
     scrollTo({ top: 0 });
     loadMore();
   }
 
+  function apply(next) {
+    data = next;
+    pending = null;
+    newBtn.hidden = true;
+    renderSources();
+    updateDate();
+    reset();
+  }
+
   async function checkNew() {
-    if (!newest) return;
     try {
-      const articles = await fetchArticles(0);
-      const count = articles.filter((a) => a.published > newest && a.url && !seen.has(a.url)).length;
+      const next = await fetchData();
+      const count = next.articles.filter((a) => a.published > newestOf(data.articles)).length;
+      if (count === 0) return;
+      pending = next;
       newBtn.textContent = `↑ ${count} ${count === 1 ? "ny sak" : "nye saker"}`;
-      newBtn.hidden = count === 0;
+      newBtn.hidden = false;
     } catch {
       // Keep the current view; try again on the next tick
     }
   }
 
-  async function loadSources() {
-    const nav = document.getElementById("sources");
-    let sources = [];
-    try {
-      const res = await fetch("/api/sources");
-      if (res.ok) sources = (await res.json()).sources;
-    } catch {}
+  function renderSources() {
+    const sources = [...new Set(data.articles.map((a) => a.source))].sort();
     const buttons = [null, ...sources].map((name) => {
       const btn = el("button", {
         type: "button",
@@ -400,31 +381,31 @@
       });
       return btn;
     });
-    nav.replaceChildren(...buttons);
+    document.getElementById("sources").replaceChildren(...buttons);
   }
 
   function updateDate() {
     const now = new Date();
-    document.getElementById("date").textContent =
-      now.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) +
-      "  ·  " +
-      now.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+    let text = now.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    if (data.updated) text += `  ·  oppdatert ${clock(new Date(data.updated * 1000))}`;
+    document.getElementById("date").textContent = text;
   }
 
   moreBtn.addEventListener("click", loadMore);
-  newBtn.addEventListener("click", reset);
+  newBtn.addEventListener("click", () => pending && apply(pending));
   new IntersectionObserver((entries) => {
-    if (entries[0].isIntersecting) loadMore();
+    if (entries[0].isIntersecting && shown < list.length) loadMore();
   }, { rootMargin: "800px" }).observe(sentinel);
   document.addEventListener("visibilitychange", () => {
     if (!document.hidden) checkNew();
   });
   setInterval(checkNew, NEW_CHECK_INTERVAL);
-  setInterval(updateDate, 30_000);
 
   updateDate();
-  loadSources();
-  loadMore();
+  statusEl.textContent = "Laster …";
+  fetchData().then(apply, () => {
+    statusEl.textContent = "Kunne ikke hente saker.";
+  });
 </script>
 </body>
 </html>
