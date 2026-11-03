@@ -1,0 +1,17 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "outputDirectory": "public",
+  "functions": {
+    "api/articles.py": {
+      "includeFiles": "{feeds.py,feeds.txt}",
+      "maxDuration": 30
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/articles.json",
+      "destination": "/api/articles"
+    }
+  ]
+}

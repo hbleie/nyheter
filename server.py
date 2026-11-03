@@ -1,197 +1,44 @@
 #!/usr/bin/env python3
 """Nyheter: a news page built from RSS feeds, with images, titles and ingresses.
 
-Standard library only. Feeds are listed in feeds.txt (one URL per line).
-Run without arguments to serve the page locally, refreshing the feeds every
-REFRESH_INTERVAL seconds, or with --build DIR to write a static copy of the
-site (used by the GitHub Pages workflow).
+Serves the page locally. The feeds are fetched on request and cached for
+feeds.CACHE_SECONDS, the same as on Vercel (api/articles.py).
 """
 
 import argparse
-import html
 import json
 import os
-import re
-import shutil
-import threading
-import time
-import urllib.request
 import webbrowser
-import xml.etree.ElementTree as ET
-from concurrent.futures import ThreadPoolExecutor
-from email.utils import parsedate_to_datetime
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-FEEDS_FILE = os.path.join(ROOT, "feeds.txt")
-STATIC_DIR = os.path.join(ROOT, "static")
-STATIC_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".css": "text/css", ".js": "text/javascript"}
-PAGE = os.path.join(STATIC_DIR, "index.html")
-REFRESH_INTERVAL = 300
-DEFAULT_PORT = 8765
-USER_AGENT = "Mozilla/5.0 (Nyheter RSS reader)"
+from feeds import get_articles
 
-NS = {
-    "media": "http://search.yahoo.com/mrss/",
-    "vg": "http://www.vg.no/namespace",
-    "dc": "http://purl.org/dc/elements/1.1/",
+PUBLIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")
+CONTENT_TYPES = {
+    ".html": "text/html; charset=utf-8",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".css": "text/css",
+    ".js": "text/javascript",
 }
-IMG_TAG = re.compile(r"""<img[^>]+src=["']([^"']+)""", re.I)
-LINK_ONLY = re.compile(r"\s*<a\s[^>]*>[^<]*</a>\s*", re.I)
-
-articles = []
-updated = 0
-articles_lock = threading.Lock()
-
-
-def strip_html(text):
-    text = re.sub(r"<[^>]+>", "", text or "")
-    text = html.unescape(text)
-    return re.sub(r"\s+", " ", text).strip()
-
-
-def http_url(url):
-    url = (url or "").strip()
-    return url if url.startswith(("http://", "https://")) else None
-
-
-def read_feeds():
-    """Return (url, fallback_image) pairs; the image column is optional."""
-    feeds = []
-    with open(FEEDS_FILE) as f:
-        for line in f:
-            parts = line.split()
-            if parts and not parts[0].startswith("#"):
-                feeds.append((parts[0], parts[1] if len(parts) > 1 else None))
-    return feeds
-
-
-def parse_date(text):
-    if not text:
-        return 0
-    try:
-        return int(parsedate_to_datetime(text).timestamp())
-    except (TypeError, ValueError):
-        pass
-    try:
-        return int(datetime.fromisoformat(text.strip().replace("Z", "+00:00")).timestamp())
-    except ValueError:
-        return 0
-
-
-def find_image(item, description):
-    for enc in item.findall("enclosure"):
-        if enc.get("type", "").startswith(("image/", "img/")):
-            return http_url(enc.get("url"))
-    for media in item.findall("media:content", NS):
-        if media.get("medium") == "image" or media.get("type", "").startswith("image/"):
-            return http_url(media.get("url"))
-    for path in ("media:thumbnail", "media:group/media:content"):
-        media = item.find(path, NS)
-        if media is not None:
-            return http_url(media.get("url"))
-    vg_img = item.findtext("vg:img", namespaces=NS)
-    if vg_img:
-        return http_url(vg_img)
-    match = IMG_TAG.search(description or "")
-    return http_url(html.unescape(match.group(1))) if match else None
-
-
-def fetch_feed(url, fallback_image=None):
-    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-    with urllib.request.urlopen(req, timeout=15) as res:
-        root = ET.fromstring(res.read())
-
-    channel = root.find("channel")
-    if channel is None:
-        return []
-    source = strip_html(channel.findtext("title")) or urlparse(url).hostname
-
-    items = []
-    for item in channel.findall("item"):
-        link = http_url(item.findtext("link"))
-        if not link:
-            continue
-        description = item.findtext("description") or ""
-        # Hacker News descriptions are just a "Comments" link, not an ingress
-        ingress = "" if LINK_ONLY.fullmatch(description) else strip_html(description)
-        items.append({
-            "title": strip_html(item.findtext("title")),
-            "ingress": ingress,
-            "source": source,
-            "published": parse_date(item.findtext("pubDate") or item.findtext("dc:date", namespaces=NS)),
-            "url": link,
-            "image": find_image(item, description) or fallback_image,
-        })
-    return items
-
-
-def refresh():
-    global articles, updated
-    feeds = read_feeds()
-    results = []
-    with ThreadPoolExecutor(max_workers=8) as pool:
-        for url, future in [(u, pool.submit(fetch_feed, u, img)) for u, img in feeds]:
-            try:
-                results.extend(future.result())
-            except Exception as e:
-                print(f"Failed to fetch {url}: {e}")
-
-    # Same story can appear in several feeds from one site (e.g. TV 2 news/sport)
-    unique = {}
-    for article in results:
-        unique.setdefault(article["url"], article)
-    fresh = sorted(unique.values(), key=lambda a: a["published"], reverse=True)
-
-    if fresh:
-        with articles_lock:
-            articles = fresh
-            updated = int(time.time())
-
-
-def refresh_loop():
-    while True:
-        time.sleep(REFRESH_INTERVAL)
-        refresh()
-
-
-def articles_json():
-    with articles_lock:
-        return json.dumps({"articles": articles, "updated": updated}, ensure_ascii=False).encode()
-
-
-def build(out_dir):
-    """Write a static copy of the site, as served by GitHub Pages."""
-    refresh()
-    if not articles:
-        raise SystemExit("No articles fetched; not building an empty site")
-    shutil.rmtree(out_dir, ignore_errors=True)
-    shutil.copytree(STATIC_DIR, os.path.join(out_dir, "static"), ignore=shutil.ignore_patterns("index.html"))
-    shutil.copy(PAGE, os.path.join(out_dir, "index.html"))
-    with open(os.path.join(out_dir, "articles.json"), "wb") as f:
-        f.write(articles_json())
-    print(f"Built {out_dir} with {len(articles)} articles")
+DEFAULT_PORT = 8765
 
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         path = urlparse(self.path).path
-        if path in ("/", "/index.html"):
-            with open(PAGE, "rb") as f:
-                self.send(200, "text/html; charset=utf-8", f.read())
-        elif path == "/articles.json":
-            self.send(200, "application/json; charset=utf-8", articles_json())
-        elif path.startswith("/static/") and self.send_static(path[len("/static/"):]):
-            pass
-        else:
+        if path == "/articles.json":
+            body = json.dumps(get_articles(), ensure_ascii=False).encode()
+            self.send(200, "application/json; charset=utf-8", body)
+        elif not self.send_public(path.lstrip("/") or "index.html"):
             self.send(404, "text/plain", b"Not found")
 
-    def send_static(self, name):
+    def send_public(self, name):
         # Flat directory only, so no path can escape it
-        content_type = STATIC_TYPES.get(os.path.splitext(name)[1])
-        path = os.path.join(STATIC_DIR, name)
+        content_type = CONTENT_TYPES.get(os.path.splitext(name)[1])
+        path = os.path.join(PUBLIC_DIR, name)
         if "/" in name or not content_type or not os.path.isfile(path):
             return False
         with open(path, "rb") as f:
@@ -214,17 +61,7 @@ def main():
     parser = argparse.ArgumentParser(description="Serve a news page built from RSS feeds.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--no-browser", action="store_true", help="don't open the page on start")
-    parser.add_argument("--build", metavar="DIR", help="write a static site to DIR and exit")
     args = parser.parse_args()
-
-    if args.build:
-        build(args.build)
-        return
-
-    print("Fetching feeds …")
-    refresh()
-    print(f"Loaded {len(articles)} articles")
-    threading.Thread(target=refresh_loop, daemon=True).start()
 
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://localhost:{args.port}/"

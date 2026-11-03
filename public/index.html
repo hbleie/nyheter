@@ -235,8 +235,8 @@
 </footer>
 
 <script>
-  // articles.json is written by server.py: served live locally, or built
-  // on a schedule by the GitHub Pages workflow
+  // articles.json comes from feeds.py: served by server.py locally and by
+  // api/articles.py on Vercel, both fetching the feeds at most once a minute
   const DATA_URL = "articles.json";
   const PAGE_SIZE = 30;
   const NEW_CHECK_INTERVAL = 60_000;
