@@ -4,8 +4,9 @@ on:
   push:
     branches: [main]
   schedule:
-    # Fetch fresh news every 15 minutes (GitHub may delay scheduled runs)
-    - cron: "*/15 * * * *"
+    # Fetch fresh news every 15 minutes. Off the quarter hours, since GitHub
+    # delays or drops scheduled runs at busy times like the top of the hour.
+    - cron: "7,22,37,52 * * * *"
   workflow_dispatch:
 
 permissions:
