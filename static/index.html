@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="nb">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nyheter</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='rgb(255,175,0)'/%3E%3Cpath d='M4 12V4h1.6l4.8 5.3V4H12v8h-1.6L5.6 6.7V12z' fill='%23121212'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #f5f3ee;
+    --surface: #ffffff;
+    --text: #1a1a1a;
+    --muted: #6b6760;
+    --border: #e3dfd6;
+    --accent: rgb(255, 175, 0);
+    --accent-text: #985a00;
+    --shadow: 0 1px 2px rgb(0 0 0 / 6%), 0 4px 16px rgb(0 0 0 / 5%);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111111;
+      --surface: #1b1b1b;
+      --text: #ececec;
+      --muted: #9a9a9a;
+      --border: #2b2b2b;
+      --accent-text: rgb(255, 175, 0);
+      --shadow: none;
+      color-scheme: dark;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  header {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .bar, .sources, main, footer {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 0 16px;
+  }
+  .bar {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding-top: 14px;
+    padding-bottom: 10px;
+  }
+  .logo {
+    margin: 0;
+    font: 800 22px/1 ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.08em;
+    color: var(--accent-text);
+  }
+  .logo::before {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 10px;
+    background: var(--accent);
+    border-radius: 2px;
+    vertical-align: 2px;
+  }
+  .date { color: var(--muted); font-size: 14px; }
+  .date::first-letter { text-transform: uppercase; }
+
+  .sources {
+    display: flex;
+    gap: 8px;
+    padding-bottom: 12px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .sources::-webkit-scrollbar { display: none; }
+  .sources button {
+    flex: none;
+    padding: 5px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font: 500 13px/1.2 inherit;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .sources button:hover { color: var(--text); }
+  .sources button[aria-pressed="true"] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #1a1a1a;
+  }
+
+  main { padding-top: 20px; }
+  #grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 20px;
+  }
+
+  .card {
+    display: flex;
+    flex-direction: column;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    color: inherit;
+    text-decoration: none;
+    box-shadow: var(--shadow);
+    transition: border-color 0.15s, transform 0.15s;
+  }
+  .card:hover { border-color: var(--accent); transform: translateY(-2px); }
+  .card:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .card:hover h2 { text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+
+  .media {
+    margin: 0;
+    aspect-ratio: 16 / 9;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .media img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+  .text-only { border-top: 4px solid var(--accent); }
+
+  .body { padding: 14px 16px 18px; }
+  .meta {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .source {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--accent-text);
+  }
+  .card h2 {
+    margin: 0 0 6px;
+    font-size: 19px;
+    line-height: 1.25;
+    font-weight: 750;
+    text-wrap: balance;
+  }
+  .card p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 15px;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  @media (min-width: 640px) {
+    .lead { grid-column: span 2; }
+    .lead h2 { font-size: 28px; }
+    .lead p { font-size: 17px; -webkit-line-clamp: 4; }
+  }
+
+  #new {
+    position: fixed;
+    top: 108px;
+    left: 50%;
+    z-index: 20;
+    transform: translateX(-50%);
+    padding: 8px 18px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--accent);
+    color: #1a1a1a;
+    font: 600 14px/1.2 inherit;
+    font-family: inherit;
+    box-shadow: 0 4px 16px rgb(0 0 0 / 25%);
+    cursor: pointer;
+  }
+  #new[hidden] { display: none; }
+
+  footer {
+    padding-top: 28px;
+    padding-bottom: 48px;
+    text-align: center;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  footer button {
+    padding: 8px 18px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    cursor: pointer;
+  }
+  footer button[hidden] { display: none; }
+  code { font-family: ui-monospace, Menlo, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <h1 class="logo">NYHETER</h1>
+    <span class="date" id="date"></span>
+  </div>
+  <nav class="sources" id="sources" aria-label="Kilder"></nav>
+</header>
+
+<button id="new" hidden></button>
+
+<main>
+  <div id="grid"></div>
+</main>
+
+<footer>
+  <p id="status"></p>
+  <button id="more" hidden>Last flere</button>
+  <div id="sentinel"></div>
+</footer>
+
+<script>
+  const NEW_CHECK_INTERVAL = 60_000;
+
+  const grid = document.getElementById("grid");
+  const statusEl = document.getElementById("status");
+  const moreBtn = document.getElementById("more");
+  const newBtn = document.getElementById("new");
+  const sentinel = document.getElementById("sentinel");
+
+  let source = decodeURIComponent(location.hash.slice(1)) || null;
+  let offset = 0;
+  let newest = 0;
+  let done = false;
+  let loading = false;
+  let generation = 0;
+  const seen = new Set();
+
+  const shortName = (name) => name.replace(/^Siste nytt (fra|-)\s*/i, "");
+
+  function formatTime(unix) {
+    const d = new Date(unix * 1000);
+    const time = d.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    if (d.toDateString() === today.toDateString()) return time;
+    if (d.toDateString() === yesterday.toDateString()) return `i går ${time}`;
+    return `${d.toLocaleDateString("nb-NO", { day: "numeric", month: "short" })} ${time}`;
+  }
+
+  function el(tag, props = {}, children = []) {
+    const node = Object.assign(document.createElement(tag), props);
+    node.append(...children);
+    return node;
+  }
+
+  function card(article, isFirst) {
+    const time = el("time", {
+      dateTime: new Date(article.published * 1000).toISOString(),
+      textContent: formatTime(article.published),
+    });
+    const body = el("div", { className: "body" }, [
+      el("div", { className: "meta" }, [
+        el("span", { className: "source", textContent: shortName(article.source) }),
+        time,
+      ]),
+      el("h2", { textContent: article.title }),
+    ]);
+    if (article.ingress) body.append(el("p", { textContent: article.ingress }));
+
+    const link = el("a", { className: "card", href: article.url }, [body]);
+
+    if (article.image) {
+      const img = el("img", { src: article.image, alt: "", loading: isFirst ? "eager" : "lazy", decoding: "async" });
+      const media = el("figure", { className: "media" }, [img]);
+      img.addEventListener("error", () => {
+        media.remove();
+        link.classList.remove("lead");
+        link.classList.add("text-only");
+      });
+      link.prepend(media);
+      if (isFirst) link.classList.add("lead");
+    } else {
+      link.classList.add("text-only");
+    }
+    return link;
+  }
+
+  async function fetchArticles(from) {
+    const params = new URLSearchParams({ offset: from });
+    if (source) params.set("source", source);
+    const res = await fetch(`/api/articles?${params}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return (await res.json()).articles;
+  }
+
+  function setStatus(text, html = false) {
+    statusEl[html ? "innerHTML" : "textContent"] = text;
+  }
+
+  function nearBottom() {
+    return sentinel.getBoundingClientRect().top < innerHeight + 800;
+  }
+
+  async function loadMore() {
+    if (loading || done) return;
+    const gen = generation;
+    loading = true;
+    moreBtn.hidden = true;
+    setStatus("Laster …");
+    try {
+      const articles = await fetchArticles(offset);
+      if (gen !== generation) return;
+      offset += articles.length;
+      done = articles.length === 0;
+      for (const article of articles) {
+        if (!article.url || seen.has(article.url)) continue;
+        seen.add(article.url);
+        newest = Math.max(newest, article.published);
+        grid.append(card(article, grid.children.length === 0));
+      }
+      if (done && grid.children.length === 0) {
+        setStatus("Ingen saker funnet. Sjekk at feeds.txt har gyldige RSS-adresser.", true);
+      } else {
+        setStatus(done ? "Ingen flere saker" : "");
+        moreBtn.hidden = done;
+      }
+    } catch (err) {
+      if (gen !== generation) return;
+      setStatus("Kunne ikke hente saker.");
+      moreBtn.hidden = false;
+    } finally {
+      if (gen === generation) loading = false;
+    }
+    if (gen === generation && !done && nearBottom()) loadMore();
+  }
+
+  function reset() {
+    generation++;
+    loading = false;
+    done = false;
+    offset = 0;
+    newest = 0;
+    seen.clear();
+    grid.replaceChildren();
+    newBtn.hidden = true;
+    scrollTo({ top: 0 });
+    loadMore();
+  }
+
+  async function checkNew() {
+    if (!newest) return;
+    try {
+      const articles = await fetchArticles(0);
+      const count = articles.filter((a) => a.published > newest && a.url && !seen.has(a.url)).length;
+      newBtn.textContent = `↑ ${count} ${count === 1 ? "ny sak" : "nye saker"}`;
+      newBtn.hidden = count === 0;
+    } catch {
+      // Keep the current view; try again on the next tick
+    }
+  }
+
+  async function loadSources() {
+    const nav = document.getElementById("sources");
+    let sources = [];
+    try {
+      const res = await fetch("/api/sources");
+      if (res.ok) sources = (await res.json()).sources;
+    } catch {}
+    const buttons = [null, ...sources].map((name) => {
+      const btn = el("button", {
+        type: "button",
+        textContent: name ? shortName(name) : "Alle",
+      });
+      btn.setAttribute("aria-pressed", String(name === source));
+      btn.addEventListener("click", () => {
+        source = name;
+        history.replaceState(null, "", name ? `#${encodeURIComponent(name)}` : location.pathname);
+        for (const b of buttons) b.setAttribute("aria-pressed", String(b === btn));
+        reset();
+      });
+      return btn;
+    });
+    nav.replaceChildren(...buttons);
+  }
+
+  function updateDate() {
+    const now = new Date();
+    document.getElementById("date").textContent =
+      now.toLocaleDateString("nb-NO", { weekday: "long", day: "numeric", month: "long", year: "numeric" }) +
+      "  ·  " +
+      now.toLocaleTimeString("nb-NO", { hour: "2-digit", minute: "2-digit" });
+  }
+
+  moreBtn.addEventListener("click", loadMore);
+  newBtn.addEventListener("click", reset);
+  new IntersectionObserver((entries) => {
+    if (entries[0].isIntersecting) loadMore();
+  }, { rootMargin: "800px" }).observe(sentinel);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) checkNew();
+  });
+  setInterval(checkNew, NEW_CHECK_INTERVAL);
+  setInterval(updateDate, 30_000);
+
+  updateDate();
+  loadSources();
+  loadMore();
+</script>
+</body>
+</html>
