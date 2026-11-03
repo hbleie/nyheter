@@ -23,7 +23,9 @@ from urllib.parse import parse_qs, urlparse
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 FEEDS_FILE = os.path.join(ROOT, "feeds.txt")
-PAGE = os.path.join(ROOT, "static", "index.html")
+STATIC_DIR = os.path.join(ROOT, "static")
+STATIC_TYPES = {".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".css": "text/css", ".js": "text/javascript"}
+PAGE = os.path.join(STATIC_DIR, "index.html")
 REFRESH_INTERVAL = 300
 ARTICLES_PER_PAGE = 30
 DEFAULT_PORT = 8765
@@ -35,6 +37,7 @@ NS = {
     "dc": "http://purl.org/dc/elements/1.1/",
 }
 IMG_TAG = re.compile(r"""<img[^>]+src=["']([^"']+)""", re.I)
+LINK_ONLY = re.compile(r"\s*<a\s[^>]*>[^<]*</a>\s*", re.I)
 
 articles = []
 articles_lock = threading.Lock()
@@ -52,8 +55,14 @@ def http_url(url):
 
 
 def read_feeds():
+    """Return (url, fallback_image) pairs; the image column is optional."""
+    feeds = []
     with open(FEEDS_FILE) as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
+        for line in f:
+            parts = line.split()
+            if parts and not parts[0].startswith("#"):
+                feeds.append((parts[0], parts[1] if len(parts) > 1 else None))
+    return feeds
 
 
 def parse_date(text):
@@ -87,7 +96,7 @@ def find_image(item, description):
     return http_url(html.unescape(match.group(1))) if match else None
 
 
-def fetch_feed(url):
+def fetch_feed(url, fallback_image=None):
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(req, timeout=15) as res:
         root = ET.fromstring(res.read())
@@ -103,13 +112,15 @@ def fetch_feed(url):
         if not link:
             continue
         description = item.findtext("description") or ""
+        # Hacker News descriptions are just a "Comments" link, not an ingress
+        ingress = "" if LINK_ONLY.fullmatch(description) else strip_html(description)
         items.append({
             "title": strip_html(item.findtext("title")),
-            "ingress": strip_html(description),
+            "ingress": ingress,
             "source": source,
             "published": parse_date(item.findtext("pubDate") or item.findtext("dc:date", namespaces=NS)),
             "url": link,
-            "image": find_image(item, description),
+            "image": find_image(item, description) or fallback_image,
         })
     return items
 
@@ -119,7 +130,7 @@ def refresh():
     feeds = read_feeds()
     results = []
     with ThreadPoolExecutor(max_workers=8) as pool:
-        for url, future in [(u, pool.submit(fetch_feed, u)) for u in feeds]:
+        for url, future in [(u, pool.submit(fetch_feed, u, img)) for u, img in feeds]:
             try:
                 results.extend(future.result())
             except Exception as e:
@@ -167,10 +178,22 @@ class Handler(BaseHTTPRequestHandler):
                 self.send_json({"articles": get_articles(offset, source=source)})
             elif url.path == "/api/sources":
                 self.send_json({"sources": get_sources()})
+            elif url.path.startswith("/static/") and self.send_static(url.path[len("/static/"):]):
+                pass
             else:
                 self.send(404, "text/plain", b"Not found")
         except ValueError:
             self.send(400, "text/plain", b"Bad request")
+
+    def send_static(self, name):
+        # Flat directory only, so no path can escape it
+        content_type = STATIC_TYPES.get(os.path.splitext(name)[1])
+        path = os.path.join(STATIC_DIR, name)
+        if "/" in name or not content_type or not os.path.isfile(path):
+            return False
+        with open(path, "rb") as f:
+            self.send(200, content_type, f.read())
+        return True
 
     def send_json(self, data, status=200):
         body = json.dumps(data, ensure_ascii=False).encode()

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#ff6600"/>
+  <rect x="250" y="110" width="140" height="140" fill="none" stroke="#fff" stroke-width="10"/>
+  <path d="M286 140h20l14 30 14-30h20l-26 50v40h-16v-40z" fill="#fff"/>
+  <text x="320" y="300" fill="#fff" font-family="Verdana, Geneva, sans-serif" font-size="28" font-weight="bold" text-anchor="middle">Hacker News</text>
+</svg>

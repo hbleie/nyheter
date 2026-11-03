@@ -25,6 +25,12 @@ Opens <http://localhost:8765/> in your browser. Options:
 
 Edit `feeds.txt`, one RSS URL per line (`#` starts a comment). Restart the server to pick up changes.
 
+An optional second column sets a fallback image for items that have none, served from `static/`:
+
+```
+https://news.ycombinator.com/rss  /static/hn.svg
+```
+
 ## How it works
 
 - `server.py` fetches every feed on start and again every 5 minutes, merges the items, removes
